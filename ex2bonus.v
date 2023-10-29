@@ -990,10 +990,9 @@ Proof.
       simpl exchange_vars.
       rewrite exchange_vars_inv.
       apply IHHA1.
-      rewrite <- exchange_vars_ctx_inv with (A := A) (x := x) (y := x0).
-      apply incl_map.
-      rewrite exchange_non_free_vars_ctx.
-      * assumption.
+      rewrite <- exchange_non_free_vars_ctx with (A := A) (x := x) (y := x0).
+      * apply incl_map.
+        assumption.
       * assumption.
       * apply NFC_incl with (B := s::t::B).
           apply incl_tl.
@@ -1009,9 +1008,8 @@ Proof.
       rewrite exchange_nat_r.
       rewrite exchange_non_free_vars.
       * apply IHHA2.
-        rewrite <- exchange_vars_ctx_inv with (A := A) (x := x) (y := x0).
-        apply incl_map.
-        rewrite exchange_non_free_vars_ctx.
+        rewrite <- exchange_non_free_vars_ctx with (A := A) (x := x) (y := x0).
+          apply incl_map.
           assumption.
           assumption.
           apply NFC_incl with (B := s::t::B).
