@@ -29,6 +29,7 @@ Inductive not_free_in_ctx : nat -> list form -> Prop :=
   |NFC_nil (x : nat) : not_free_in_ctx x []
   |NFC_l (x : nat) (s : form) (A : list form) : not_free_in x s -> not_free_in_ctx x A -> not_free_in_ctx x (s::A).
 
+(*
 Fixpoint bind_height (x height : nat) (s : form) : form :=
   match s with
   | free_var n => if Nat.eqb x n then bound_var height else free_var n
@@ -49,21 +50,21 @@ Definition my_for_all (x : nat) (s : form) : form :=
 
 Definition my_exist (x : nat) (s : form) : form :=
   exist (bind x s).
+*)
 
-Fixpoint unbind_height (s : form) (x height : nat) : form :=
+Definition unbind (s : form) (x : nat) : form :=
+  let fix aux (s : form) (x height : nat) : form :=
   match s with
     | free_var n => free_var n
     | bound_var n => if Nat.eqb height n then free_var x else bound_var n
     | bot => bot
-    | imp s t => imp (unbind_height s x height) (unbind_height t x height)
-    | conj s t => conj (unbind_height s x height) (unbind_height t x height)
-    | disj s t => disj (unbind_height s x height) (unbind_height t x height)
-    | for_all s => for_all (unbind_height s x (S height))
-    | exist s => exist (unbind_height s x (S height))
-    end.
-
-Definition unbind (s : form) (x : nat) : form :=
-  unbind_height s x 0.
+    | imp s t => imp (aux s x height) (aux t x height)
+    | conj s t => conj (aux s x height) (aux t x height)
+    | disj s t => disj (aux s x height) (aux t x height)
+    | for_all s => for_all (aux s x (S height))
+    | exist s => exist (aux s x (S height))
+    end
+  in aux s x 0.
 
 Print In.
 Print incl.
@@ -91,6 +92,8 @@ Inductive nd : list form -> form -> Prop :=
 
 
 Notation "A |- s" := (nd A s) ( at level 70).
+
+(* Properties of not_free_in *)
 
 Lemma NF_free_var_eq (x n : nat) :
   not_free_in x (free_var n) <-> x <> n.
@@ -245,6 +248,8 @@ Proof.
     assumption.
 Qed.
 
+(* Properties of not_free_in_ctx *)
+
 Lemma NFC_in (A : list form) (x : nat) (a : form) : In a A -> not_free_in_ctx x A -> not_free_in x a.
 Proof.
   intros I NFCA.
@@ -296,6 +301,8 @@ Proof.
     + assumption.
     + assumption.
 Qed.
+
+(* Proving that, given a context, there exists a variable which does not appear as a free variable in this context *)
 
 Lemma NF_bounded (s : form) :
   exists (x0 : nat), forall (x : nat), x >= x0 -> not_free_in x s.
@@ -399,32 +406,12 @@ Proof.
   apply Nat.le_refl.
 Qed.
 
-Lemma unbind_inv (A : list form) (s : form) (x y : nat) :
-  not_free_in_ctx x A -> not_free_in x s -> A |- unbind s x -> A |- unbind s y.
-Proof.
-  intros NFC NF ND.
-  apply Efor_all.
-  apply Ifor_all with (x := x).
-  + assumption.
-  + assumption.
-  + assumption.
-Qed.
+(* Defining a function nat -> nat which swaps two integers *)
 
 Definition exchange_nat (x y z : nat) : nat :=
   if Nat.eqb z x then y else if Nat.eqb z y then x else z.
 
-Fixpoint exchange_vars (s : form) (x y : nat) : form :=
-  match s with
-  | free_var n => free_var (exchange_nat x y n)
-  | bound_var n => bound_var n
-  | bot => bot
-  | imp s t => imp (exchange_vars s x y) (exchange_vars t x y)
-  | conj s t => conj (exchange_vars s x y) (exchange_vars t x y)
-  | disj s t => disj (exchange_vars s x y) (exchange_vars t x y)
-  | for_all s => for_all (exchange_vars s x y)
-  | exist s => exist (exchange_vars s x y)
-  end.
-
+(*
 Lemma exchange_nat_refl (x y : nat) :
   exchange_nat x x y = y.
 Proof.
@@ -438,7 +425,9 @@ Proof.
     rewrite Neq.
     reflexivity.
 Qed.
+*)
 
+(*
 Lemma exchange_nat_sym (x y z : nat) :
   exchange_nat x y z = exchange_nat y x z.
 Proof.
@@ -465,7 +454,7 @@ Proof.
       rewrite Neq1.
       reflexivity.
 Qed.
-
+*)
 
 Lemma exchange_nat_l (x y : nat) :
   exchange_nat x y x = y.
@@ -478,8 +467,15 @@ Qed.
 Lemma exchange_nat_r (x y : nat) :
   exchange_nat x y y = x.
 Proof.
-  rewrite exchange_nat_sym.
-  apply exchange_nat_l.
+  unfold exchange_nat.
+  destruct (Bool.bool_dec (Nat.eqb y x) true) as [Eq | Neq].
+  - rewrite Eq.
+    apply Nat.eqb_eq.
+    assumption.
+  - apply Bool.not_true_iff_false in Neq.
+    rewrite Neq.
+    rewrite (Nat.eqb_refl y).
+    reflexivity.
 Qed.
 
 Lemma exchange_nat_inv (x y z : nat) :
@@ -512,12 +508,26 @@ Proof.
       assumption.
     * apply Bool.not_true_iff_false in Neq1.
       rewrite Neq1.
-      simpl exchange_vars.
       rewrite Neq.
       rewrite Neq1.
       reflexivity.
 Qed.
 
+(* Exchanging all the occurences of two variables in a formula *)
+
+Fixpoint exchange_vars (s : form) (x y : nat) : form :=
+  match s with
+  | free_var n => free_var (exchange_nat x y n)
+  | bound_var n => bound_var n
+  | bot => bot
+  | imp s t => imp (exchange_vars s x y) (exchange_vars t x y)
+  | conj s t => conj (exchange_vars s x y) (exchange_vars t x y)
+  | disj s t => disj (exchange_vars s x y) (exchange_vars t x y)
+  | for_all s => for_all (exchange_vars s x y)
+  | exist s => exist (exchange_vars s x y)
+  end.
+
+(*
 Lemma exchange_vars_refl (s : form) (x : nat) :
   exchange_vars s x x = s.
 Proof.
@@ -546,7 +556,9 @@ Proof.
     rewrite IHs.
     reflexivity.
 Qed.
+*)
 
+(*
 Lemma exchange_vars_sym (s : form) (x y : nat) :
   exchange_vars s x y = exchange_vars s y x.
 Proof.
@@ -575,6 +587,7 @@ Proof.
     rewrite IHs.
     reflexivity.
 Qed.
+*)
 
 Lemma exchange_vars_inv (s : form) (x y : nat) :
   exchange_vars (exchange_vars s x y) x y = s.
@@ -676,38 +689,35 @@ Proof.
   generalize 0.
   induction s; intro height.
   - reflexivity.
-  - unfold unbind.
-    simpl unbind_height.
-    case (Nat.eqb height x0).
-    + reflexivity.
-    + reflexivity.
+  - simpl exchange_vars.
+    destruct (Bool.bool_dec (Nat.eqb height x0) true) as [Eq | Neq].
+    + rewrite Eq.
+      reflexivity.
+    + apply Bool.not_true_iff_false in Neq.
+      rewrite Neq.
+      reflexivity.
   - reflexivity.
   - simpl exchange_vars.
     unfold unbind.
-    simpl unbind_height.
     apply f_equal2.
     + apply IHs1.
     + apply IHs2.
   - simpl exchange_vars.
     unfold unbind.
-    simpl unbind_height.
     apply f_equal2.
     + apply IHs1.
     + apply IHs2.
   - simpl exchange_vars.
     unfold unbind.
-    simpl unbind_height.
     apply f_equal2.
     + apply IHs1.
     + apply IHs2.
   - simpl exchange_vars.
     unfold unbind.
-    simpl unbind_height.
     apply f_equal.
     apply IHs.
   - simpl exchange_vars.
     unfold unbind.
-    simpl unbind_height.
     apply f_equal.
     apply IHs.
 Qed.
@@ -749,9 +759,12 @@ Proof.
     apply IHs; apply NF_exist_eq; assumption.
 Qed.
 
+(* Exchanging the occurences of two variables in a context *)
+
 Definition exchange_vars_ctx (A : list form) (x y : nat) : list form :=
   map (fun (s : form) => exchange_vars s x y) A.
 
+(*
 Lemma exchange_vars_ctx_refl (A : list form) (x : nat) :
   exchange_vars_ctx A x x = A.
 Proof.
@@ -762,7 +775,9 @@ Proof.
     + apply exchange_vars_refl.
     + assumption.
 Qed.
+*)
 
+(*
 Lemma exchange_vars_ctx_sym (A : list form) (x y : nat) :
   exchange_vars_ctx A x y = exchange_vars_ctx A y x.
 Proof.
@@ -773,6 +788,7 @@ Proof.
     + apply exchange_vars_sym.
     + assumption.
 Qed.
+*)
 
 Lemma exchange_vars_ctx_inv (A : list form) (x y : nat) :
   exchange_vars_ctx (exchange_vars_ctx A x y) x y = A.
