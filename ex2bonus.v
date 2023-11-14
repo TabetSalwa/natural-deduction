@@ -8,7 +8,7 @@ Require Import Arith.Le.
 Inductive form : Type :=
 | free_var (x : nat)
 | bound_var (x : nat) 
-| bot 
+| bot
 | imp (s t : form)
 | conj (s t : form)
 | disj (s t : form)
@@ -1040,24 +1040,668 @@ Record HeytingAlgebra : Type :=
   leq_meet s t u : ((leq u s) /\ (leq u t)) <-> leq u (meet s t);
   leq_impl s t u : (leq (meet s t) u) <-> leq s (impl t u);
   leq_join s t u : ((leq s u) /\ (leq t u)) <-> leq (join s t) u;
-  leq_inf f u : leq u (inf f) <-> forall (s:H), leq u (f s);
-  leq_sup f u : leq (sup f) u <-> exists (s:H), leq (f s) u
+  leq_inf f u : (forall (s:H), leq u (f s)) <-> leq u (inf f);
+  leq_sup f u : (forall (s:H), leq (f s) u) <-> leq (sup f) u
 }.
 
-Notation "s <= t" := (leq s t).
-
 (** 2.c *)
-Fixpoint eval {HA} (val : nat -> H HA) (f : form) :=
-  match f with
-  | free_var x => val x 
-  | bound_var => 
-  | bot => bottom HA 
-  | imp s t => impl (eval val s) (eval val t)
-  | conj s t => meet (eval val s) (eval val t)
-  | disj s t => join (eval val s) (eval val t)
-  | for_all s => 
-  | exist s =>
+
+(* Implémentation de vect A n comme type des fonctions d'un ensemble fini de cardinal n dans A *)
+
+Inductive fin : nat -> Set :=
+  | Zero : forall (n : nat), fin (S n)
+  | Succ : forall (n : nat), fin n -> fin (S n).
+
+Inductive vect (A : Type) : nat -> Type :=
+  | Vnil : vect A 0
+  | Vcons : forall (n : nat), A -> vect A n -> vect A (S n).
+
+Fixpoint nat_to_fin (n m : nat) : m < n ->  fin n :=
+  match n with
+  | 0 => fun p => except ((Nat.nle_succ_0 m) p)
+  | S n => match m with
+           | 0 => fun p => Zero n
+           | S m => fun p => Succ (nat_to_fin (le_S_n (S m) n p))
+           end
   end.
+
+Fixpoint fin_incl (n m : nat) : m <= n -> fin m -> fin n :=
+  match n with
+  | 0 => match m with
+         | 0 => fun _ t => t
+         | S m => fun p _ => except (Nat.nle_succ_0 m p)
+         end
+  | S n => match m with
+           | 0 => fun _ (t : fin 0) => match t in fin m return (match m with 0 => fin (S n) | S _ => unit end) with
+                             | Zero _ => tt
+                             | Succ _ => tt
+                             end
+           | S m => fun p t => let t := match t in fin (S m) return option (fin m) with
+                               | Zero _ => None
+                               | Succ t => Some t
+                               end in match t with
+                               | None => Zero n
+                               | Some t => Succ (fin_incl (le_S_n m n p) t)
+                               end
+           end
+  end.
+
+
+Fixpoint vect_proj (A : Type) (n m : nat) : m <= n -> vect A n -> vect A m :=
+  match n with
+  | 0 => match m with
+         | 0 => fun _ v => v
+         | S m => fun p _ => match (fin_incl p (Zero m)) in fin n0 return (match n0 with 0 => vect A (S m) | S _ => unit end) with
+                             | Zero _ => tt
+                             | Succ _ => tt
+                             end
+         end
+  | S n => match m with
+           | 0 => fun _ _ => Vnil A
+           | S m => fun p v => let (x,v) := (match v in vect _ (S n) return A * vect A n with
+                               | Vcons x v => (x,v)
+                               end) in Vcons x (vect_proj (le_S_n m n p) v)
+           end
+  end.
+
+Fixpoint Vnth (A : Type) (n : nat) (t : fin n) : vect A n -> A :=
+  match t with
+  | Zero n => fun v => match v with Vcons x _ => x end
+  | Succ t => fun v => Vnth t (match v with Vcons _ v => v end)
+  end.
+
+
+Lemma vect_proj_vnth (A : Type) (n m : nat) (p : m <= n) (t : fin m) (v : vect A n) :
+  Vnth t (vect_proj p v) = Vnth (fin_incl p t) v.
+Proof.
+  revert m t p.
+  induction v; intros m t.
+  - destruct t; intro p; contradiction (Nat.nle_succ_0 n p).
+  - destruct t; intro p.
+    + reflexivity.
+    + apply IHv.
+Qed.
+
+Fixpoint make_vect (A : Type) (n : nat) (x : A) : vect A n :=
+  match n with
+  | 0 => Vnil A
+  | S n => Vcons x (make_vect n x)
+  end.
+
+Fixpoint vect_app (A : Type) (n m : nat) (a0 : A) : m <= n -> vect A m -> vect A n :=
+  match n with
+  | 0 => match m with
+         | 0 => fun _ _ => Vnil A
+         | S m => fun (p : S m <= 0) _ => match fin_incl p (Zero m) in fin n0 return (match n0 with 0 => vect A 0 | S _ => unit end) with
+                                          | Zero _ => tt
+                                          | Succ _ => tt
+                                          end
+         end
+  | S n => match m with
+           | 0 => fun _ _ => make_vect (S n) a0
+           | S m => fun (p : S m <= S n) (v : vect A (S m)) => let (x,v') := (match v in vect _ (S m) return A * vect A m with
+                                                               | Vcons x v => (x,v)
+                                                               end) in Vcons x (vect_app a0 (le_S_n m n p) v')
+           end
+  end.
+
+Lemma vect_proj_app_inv (A : Type) (n m : nat) (a0 : A) (p : m <= n) (v : vect A m) :
+  vect_proj p (vect_app a0 p v) = v.
+Proof.
+  revert m p v.
+  induction n; intros m p v.
+  - induction v.
+    + reflexivity.
+    + contradiction (Nat.nle_succ_0 n p).
+  - induction v.
+    + reflexivity.
+    + simpl.
+      apply f_equal2 with (f := @Vcons A n0).
+      * reflexivity.
+      * apply IHn.
+Qed.
+
+
+(* is_valid *)
+
+Inductive is_valid : nat -> form -> Prop :=
+| Valid_free_var : forall (depth x : nat), is_valid depth (free_var x)
+| Valid_bound_var : forall (depth n : nat), n < depth -> is_valid depth (bound_var n)
+| Valid_bot : forall (depth : nat), is_valid depth bot
+| Valid_imp : forall (depth : nat) (s t : form), is_valid depth s -> is_valid depth t -> is_valid depth (imp s t)
+| Valid_conj : forall (depth : nat) (s t : form), is_valid depth s -> is_valid depth t -> is_valid depth (conj s t)
+| Valid_disj : forall (depth : nat) (s t : form), is_valid depth s -> is_valid depth t -> is_valid depth (disj s t)
+| Valid_for_all : forall (depth : nat) (s : form), is_valid (S depth) s -> is_valid depth (for_all s)
+| Valid_exist : forall (depth : nat) (s : form), is_valid (S depth) s -> is_valid depth (exist s).
+
+Lemma valid_bound_var_eq (depth n : nat) :
+  is_valid depth (bound_var n) -> n < depth.
+Proof.
+  remember (bound_var n) as s.
+  intro HValid.
+  destruct HValid; solve [discriminate Heqs | injection Heqs; intro Eqs; rewrite <- Eqs; assumption].
+Defined.
+
+Lemma valid_imp_eq (depth : nat) (s t : form) :
+  is_valid depth (imp s t) -> is_valid depth s /\ is_valid depth t.
+Proof.
+  remember (imp s t) as u.
+  intro HValid.
+  destruct HValid; solve [discriminate Hequ | injection Hequ; intros Eqt Eqs; rewrite <- Eqt; rewrite <- Eqs; split; assumption]. 
+Defined.
+
+Lemma valid_conj_eq (depth : nat) (s t : form) :
+  is_valid depth (conj s t) -> is_valid depth s /\ is_valid depth t.
+Proof.
+  remember (conj s t) as u.
+  intro HValid.
+  destruct HValid; solve [discriminate Hequ | injection Hequ; intros Eqt Eqs; rewrite <- Eqt; rewrite <- Eqs; split; assumption]. 
+Defined.
+
+Lemma valid_disj_eq (depth : nat) (s t : form) :
+  is_valid depth (disj s t) -> is_valid depth s /\ is_valid depth t.
+Proof.
+  remember (disj s t) as u.
+  intro HValid.
+  destruct HValid; solve [discriminate Hequ | injection Hequ; intros Eqt Eqs; rewrite <- Eqt; rewrite <- Eqs; split; assumption]. 
+Defined.
+
+Lemma valid_for_all_eq (depth : nat) (s : form) :
+  is_valid depth (for_all s) -> is_valid (S depth) s.
+Proof.
+  remember (for_all s) as t.
+  intro HValid.
+  destruct HValid; solve [discriminate Heqt | injection Heqt; intro Eqs; rewrite <- Eqs; assumption].
+Defined.
+
+Lemma valid_exist_eq (depth : nat) (s : form) :
+  is_valid depth (exist s) -> is_valid (S depth) s.
+Proof.
+  remember (exist s) as t.
+  intro HValid.
+  destruct HValid; solve [discriminate Heqt | injection Heqt; intro Eqs; rewrite <- Eqs; assumption].
+Defined.
+
+Inductive is_valid_ctx : nat -> list form -> Prop :=
+  | Valid_nil : forall (depth : nat), is_valid_ctx depth []
+  | Valid_cons : forall (depth : nat) (a : form) (A : list form), is_valid depth a -> is_valid_ctx depth A -> is_valid_ctx depth (a::A).
+
+Lemma valid_cons_eq (depth : nat) (a : form) (A : list form) :
+  is_valid_ctx depth (a::A) -> is_valid depth a /\ is_valid_ctx depth A.
+Proof.
+  remember (a::A) as A'.
+  intro HValid.
+  destruct HValid.
+  - discriminate HeqA'.
+  - injection HeqA'.
+    intros EqA Eqa.
+    rewrite <- EqA.
+    rewrite <- Eqa.
+    split; assumption.
+Qed.
+
+
+Fixpoint eval_rec {HA} (val : nat -> H HA) (f : form) (depth : nat) : is_valid depth f -> vect (H HA) depth -> H HA :=
+  match f with
+  | free_var x => fun _ => fun _ => val x
+  | bound_var n => fun p => Vnth (nat_to_fin (valid_bound_var_eq p))
+  | bot => fun _ => fun _ => bottom HA
+  | imp s t => fun p => fun v => impl (eval_rec val (proj1 (valid_imp_eq p)) v) (eval_rec val (proj2 (valid_imp_eq p)) v)
+  | conj s t => fun p => fun v => meet (eval_rec val (proj1 (valid_conj_eq p)) v) (eval_rec val (proj2 (valid_conj_eq p)) v)
+  | disj s t => fun p => fun v => join (eval_rec val (proj1 (valid_disj_eq p)) v) (eval_rec val (proj2 (valid_disj_eq p)) v)
+  | for_all s => fun p => fun v => inf (fun x => eval_rec val (valid_for_all_eq p) (Vcons x v))
+  | exist s => fun p => fun v => sup (fun x => eval_rec val (valid_exist_eq p) (Vcons x v))
+  end.
+
+Definition eval {HA} (val : nat -> H HA) (f : form) (p : is_valid 0 f) : H HA := eval_rec val p (Vnil (H HA)).
+
+
+(* Proof irrelevance dans toutes les fonctions ci-dessus *)
+
+Lemma nat_to_fin_proof_irrelevance (n m : nat) (p q : m < n) :
+  nat_to_fin p = nat_to_fin q.
+Proof.
+  revert m p q.
+  induction n; intro m.
+  - intro p.
+    contradiction (Nat.nle_succ_0 m p).
+  - induction m; intros p q.
+    + reflexivity.
+    + simpl nat_to_fin.
+      apply f_equal.
+      apply IHn.
+Qed.
+
+Lemma fin_incl_proof_irrelevance (n m : nat) (p q : m <= n) :
+  fin_incl p = fin_incl q.
+Proof.
+  revert m p q.
+  induction n; intro m.
+  - destruct m; intros p q.
+    + reflexivity.
+    + contradiction (Nat.nle_succ_0 m p).
+  - destruct m; intros p q.
+    + reflexivity.
+    + simpl fin_incl.
+      rewrite IHn with (p := le_S_n m n p) (q := le_S_n m n q).
+      reflexivity.
+Qed.
+
+Lemma vect_proj_proof_irrelevance (A : Type) (n m : nat) (p q : m <= n) :
+  @vect_proj A n m p = @vect_proj A n m q.
+Proof.
+  revert m p q.
+  induction n; intro m.
+  - destruct m; intros p q.
+    + reflexivity.
+    + contradiction (Nat.nle_succ_0 m p).
+  - destruct m; intros p q.
+    + reflexivity.
+    + simpl vect_proj.
+      rewrite IHn with (p := le_S_n m n p) (q := le_S_n m n q).
+      reflexivity.
+Qed.
+
+Lemma eval_rec_proof_irrelevance {HA} (val : nat -> H HA) (f : form) (depth : nat) (p q : is_valid depth f) :
+  eval_rec val p = eval_rec val q.
+Proof.
+  revert depth p q.
+  induction f; intros depth p q.
+  - reflexivity.
+  - simpl eval_rec.
+    apply f_equal with (f := fun t v => Vnth t v).
+    apply nat_to_fin_proof_irrelevance.
+  - reflexivity.
+  - simpl eval_rec.
+    apply f_equal2 with (f := fun f1 f2 v => impl (f1 v) (f2 v)).
+    + apply IHf1.
+    + apply IHf2.
+  - simpl eval_rec.
+    apply f_equal2 with (f := fun f1 f2 v => meet (f1 v) (f2 v)).
+    + apply IHf1.
+    + apply IHf2.
+  - simpl eval_rec.
+    apply f_equal2 with (f := fun f1 f2 v => join (f1 v) (f2 v)).
+    + apply IHf1.
+    + apply IHf2.
+  - simpl eval_rec.
+    apply f_equal with (f := fun f v => inf (fun x => f (Vcons x v))).
+    apply IHf.
+  - simpl eval_rec.
+    apply f_equal with (f := fun f v => sup (fun x => f (Vcons x v))).
+    apply IHf.
+Qed.
+
+Lemma is_valid_increasing (f : form) (depth depth' : nat) :
+  depth <= depth' -> is_valid depth f -> is_valid depth' f.
+Proof.
+  intros Hle Hvalid.
+  revert depth' Hle.
+  induction Hvalid; intros depth' Hle.
+  - apply Valid_free_var.
+  - apply Valid_bound_var.
+    apply Nat.le_trans with (m := depth).
+    + apply H0.
+    + apply Hle.
+  - apply Valid_bot.
+  - apply Valid_imp.
+    + apply IHHvalid1.
+      apply Hle.
+    + apply IHHvalid2.
+      apply Hle.
+  - apply Valid_conj.
+    + apply IHHvalid1.
+      apply Hle.
+    + apply IHHvalid2.
+      apply Hle.
+  - apply Valid_disj.
+    + apply IHHvalid1.
+      apply Hle.
+    + apply IHHvalid2.
+      apply Hle.
+  - apply Valid_for_all.
+    apply IHHvalid.
+    apply le_n_S.
+    apply Hle.
+  - apply Valid_exist.
+    apply IHHvalid.
+    apply le_n_S.
+    apply Hle.
+Qed.
+
+Lemma is_valid_ctx_increasing (A : list form) (depth depth' : nat) :
+  depth <= depth' -> is_valid_ctx depth A -> is_valid_ctx depth' A.
+Proof.
+  intros Hle HValid.
+  induction HValid.
+  - apply Valid_nil.
+  - apply Valid_cons.
+    + apply (is_valid_increasing Hle H0).
+    + apply (IHHValid Hle).
+Qed.
+
+Lemma is_valid_eventually (f : form) :
+  exists (depth : nat), is_valid depth f.
+Proof.
+  induction f.
+  - exists 0.
+    apply Valid_free_var.
+  - exists (S x).
+    apply Valid_bound_var.
+    apply Nat.le_refl.
+  - exists 0.
+    apply Valid_bot.
+  - destruct IHf1.
+    destruct IHf2.
+    exists (Nat.max x x0).
+    apply Valid_imp.
+    + apply (is_valid_increasing (Nat.le_max_l x x0) H0).
+    + apply (is_valid_increasing (Nat.le_max_r x x0) H1).
+  - destruct IHf1.
+    destruct IHf2.
+    exists (Nat.max x x0).
+    apply Valid_conj.
+    + apply (is_valid_increasing (Nat.le_max_l x x0) H0).
+    + apply (is_valid_increasing (Nat.le_max_r x x0) H1).
+  - destruct IHf1.
+    destruct IHf2.
+    exists (Nat.max x x0).
+    apply Valid_disj.
+    + apply (is_valid_increasing (Nat.le_max_l x x0) H0).
+    + apply (is_valid_increasing (Nat.le_max_r x x0) H1).
+  - destruct IHf.
+    exists x.
+    apply Valid_for_all.
+    apply (is_valid_increasing (Nat.le_succ_diag_r x) H0).
+  - destruct IHf.
+    exists x.
+    apply Valid_exist.
+    apply (is_valid_increasing (Nat.le_succ_diag_r x) H0).
+Qed.
+
+
+Lemma nat_to_fin_incl (n m o : nat) (p : m < n) (q : n <= o) :
+  fin_incl q (nat_to_fin p) = nat_to_fin (Nat.le_trans (S m) n o p q).
+Proof.
+  revert n q m p.
+  induction o.
+  - intros n q m p.
+    contradiction (Nat.nle_succ_0 m (Nat.le_trans (S m) n 0 p q)).
+  - induction n; intro q.
+    + intros m p.
+      contradiction (Nat.nle_succ_0 m p).
+    + induction m; intro p.
+      * reflexivity.
+      * simpl.
+        apply f_equal with (f := @Succ o).
+        rewrite nat_to_fin_proof_irrelevance with (p := le_S_n (S m) o (Nat.le_trans (S (S m)) (S n) (S o) p q)) (q := Nat.le_trans (S m) n o (le_S_n (S m) n p) (le_S_n n o q)).
+        apply IHo with (q := le_S_n n o q) (p := le_S_n (S m) n p).
+Qed.
+
+Definition equivalent {HA} (u v : H HA) : Prop := leq u v /\ leq v u.
+
+Lemma equivalent_meet {HA} (s s' t t' : H HA) :
+  equivalent s s' -> equivalent t t' -> equivalent (meet s t) (meet s' t').
+Proof.
+  intros Hs Ht.
+  split.
+  - apply leq_meet.
+    split.
+    + apply leq_trans with (t := s).
+      * apply leq_meet with (s := s) (t := t) (u := meet s t).
+        apply leq_refl.
+      * apply Hs.
+    + apply leq_trans with (t := t).
+      * apply leq_meet with (s := s) (t := t) (u := meet s t).
+        apply leq_refl.
+      * apply Ht.
+  - apply leq_meet.
+    split.
+    + apply leq_trans with (t := s').
+      * apply leq_meet with (s := s') (t := t') (u := meet s' t').
+        apply leq_refl.
+      * apply Hs.
+    + apply leq_trans with (t := t').
+      * apply leq_meet with (s := s') (t := t') (u := meet s' t').
+        apply leq_refl.
+      * apply Ht.
+Qed.
+
+Lemma equivalent_join {HA} (s s' t t' : H HA) :
+  equivalent s s' -> equivalent t t' -> equivalent (join s t) (join s' t').
+Proof.
+  intros Hs Ht.
+  split.
+  - apply leq_join.
+    split.
+    + apply leq_trans with (t := s').
+      * apply Hs.
+      * apply leq_join with (s := s') (t := t') (u := join s' t').
+        apply leq_refl.
+    + apply leq_trans with (t := t').
+      * apply Ht.
+      * apply leq_join with (s := s') (t := t') (u := join s' t').
+        apply leq_refl.
+  - apply leq_join.
+    split.
+    + apply leq_trans with (t := s).
+      * apply Hs.
+      * apply leq_join with (s := s) (t := t) (u := join s t).
+        apply leq_refl.
+    + apply leq_trans with (t := t).
+      * apply Ht.
+      * apply leq_join with (s := s) (t := t) (u := join s t).
+        apply leq_refl.
+Qed.
+
+Lemma equivalent_impl {HA} (s s' t t' : H HA) :
+  equivalent s s' -> equivalent t t' -> equivalent (impl s t) (impl s' t').
+Proof.
+  intros Hs Ht.
+  split.
+  - apply leq_impl.
+    apply leq_trans with (t := meet (impl s t) s).
+    + apply equivalent_meet.
+      * split; apply leq_refl.
+      * apply Hs.
+    + apply leq_trans with (t := t).
+      * apply leq_impl.
+        apply leq_refl.
+      * apply Ht.
+  - apply leq_impl.
+    apply leq_trans with (t := meet (impl s' t') s').
+    + apply equivalent_meet.
+      * split; apply leq_refl.
+      * split; apply Hs.
+    + apply leq_trans with (t := t').
+      * apply leq_impl.
+        apply leq_refl.
+      * apply Ht.
+Qed.
+
+Lemma equivalent_inf {HA} (f f' : H HA -> H HA) :
+  (forall (s : H HA), equivalent (f s) (f' s)) -> equivalent (inf f) (inf f').
+Proof.
+  intro Hs.
+  split.
+  - apply leq_inf.
+    intro s.
+    apply leq_trans with (t := f s).
+    + apply leq_inf.
+      apply leq_refl.
+    + apply Hs.
+  - apply leq_inf.
+    intro s.
+    apply leq_trans with (t := f' s).
+    + apply leq_inf.
+      apply leq_refl.
+    + apply Hs.
+Qed.
+
+Lemma equivalent_sup {HA} (f f' : H HA -> H HA) :
+  (forall (s : H HA), equivalent (f s) (f' s)) -> equivalent (sup f) (sup f').
+Proof.
+  intro Hs.
+  split.
+  - apply leq_sup.
+    intro s.
+    apply leq_trans with (t := f' s).
+    + apply Hs.
+    + apply leq_sup.
+      apply leq_refl.
+  - apply leq_sup.
+    intro s.
+    apply leq_trans with (t := f s).
+    + apply Hs.
+    + apply leq_sup.
+      apply leq_refl.
+Qed.
+(*
+Proof.
+  intro Hs.
+  split.
+  - apply leq_sup.
+    destruct ((proj2 (leq_sup f (sup f))) (leq_refl (sup f))).
+    exists x.
+    apply leq_trans with (t := f x).
+    + apply H0.
+    + apply Hs.
+  - apply leq_sup.
+    destruct ((proj2 (leq_sup f' (sup f'))) (leq_refl (sup f'))).
+    exists x.
+    apply leq_trans with (t := f' x).
+    + apply H0.
+    + apply Hs.
+Qed.
+*)
+
+Lemma eval_rec_vect_proj {HA} (val : nat -> H HA) (f : form) (depth depth' : nat) (p : depth <= depth') (q : is_valid depth f) (v : vect (H HA) depth') :
+  equivalent (eval_rec val (is_valid_increasing p q) v) (eval_rec val q (vect_proj p v)).
+Proof.
+  revert depth depth' p q v.
+  induction f; intros depth depth' p q v; simpl eval_rec.
+  - split; apply leq_refl.
+  - rewrite nat_to_fin_proof_irrelevance with (p := valid_bound_var_eq (is_valid_increasing p q)) (q := Nat.le_trans (S x) depth depth' (valid_bound_var_eq q) p).
+    rewrite <- nat_to_fin_incl with (p := valid_bound_var_eq q) (q := p).
+    rewrite vect_proj_vnth with (p := p) (t := nat_to_fin (valid_bound_var_eq q)) (v := v).
+    split; apply leq_refl.
+  - split; apply leq_refl.
+  - apply equivalent_impl.
+    + rewrite eval_rec_proof_irrelevance with (p := proj1 (valid_imp_eq (is_valid_increasing p q))) (q := is_valid_increasing p (proj1 (valid_imp_eq q))).
+      apply IHf1 with (p := p) (q := proj1 (valid_imp_eq q)).
+    + rewrite eval_rec_proof_irrelevance with (p := proj2 (valid_imp_eq (is_valid_increasing p q))) (q := is_valid_increasing p (proj2 (valid_imp_eq q))).
+      apply IHf2 with (p := p) (q := proj2 (valid_imp_eq q)).
+  - apply equivalent_meet.
+    + rewrite eval_rec_proof_irrelevance with (p := proj1 (valid_conj_eq (is_valid_increasing p q))) (q := is_valid_increasing p (proj1 (valid_conj_eq q))).
+      apply IHf1 with (p := p) (q := proj1 (valid_conj_eq q)).
+    + rewrite eval_rec_proof_irrelevance with (p := proj2 (valid_conj_eq (is_valid_increasing p q))) (q := is_valid_increasing p (proj2 (valid_conj_eq q))).
+      apply IHf2 with (p := p) (q := proj2 (valid_conj_eq q)).
+  - apply equivalent_join.
+    + rewrite eval_rec_proof_irrelevance with (p := proj1 (valid_disj_eq (is_valid_increasing p q))) (q := is_valid_increasing p (proj1 (valid_disj_eq q))).
+      apply IHf1 with (p := p) (q := proj1 (valid_disj_eq q)).
+    + rewrite eval_rec_proof_irrelevance with (p := proj2 (valid_disj_eq (is_valid_increasing p q))) (q := is_valid_increasing p (proj2 (valid_disj_eq q))).
+      apply IHf2 with (p := p) (q := proj2 (valid_disj_eq q)).
+  - apply equivalent_inf.
+    intro s.
+    rewrite eval_rec_proof_irrelevance with (p := valid_for_all_eq (is_valid_increasing p q)) (q := is_valid_increasing (le_n_S depth depth' p) (valid_for_all_eq q)).
+    rewrite vect_proj_proof_irrelevance with (p := p) (q := le_S_n depth depth' (le_n_S depth depth' p)).
+    change (Vcons s (vect_proj (le_S_n depth depth' (le_n_S depth depth' p)) v)) with (vect_proj (le_n_S depth depth' p) (Vcons s v)).
+    apply IHf with (p := le_n_S depth depth' p) (q := valid_for_all_eq q).
+  - apply equivalent_sup.
+    intro s.
+    rewrite eval_rec_proof_irrelevance with (p := valid_exist_eq (is_valid_increasing p q)) (q := is_valid_increasing (le_n_S depth depth' p) (valid_exist_eq q)).
+    rewrite vect_proj_proof_irrelevance with (p := p) (q := le_S_n depth depth' (le_n_S depth depth' p)).
+    change (Vcons s (vect_proj (le_S_n depth depth' (le_n_S depth depth' p)) v)) with (vect_proj (le_n_S depth depth' p) (Vcons s v)).
+    apply IHf with (p := le_n_S depth depth' p) (q := valid_exist_eq q).
+Qed.
+
+Fixpoint Meet_valid_ctx {HA} (val : nat -> H HA) (A : list form) (depth : nat) : is_valid_ctx depth A -> vect (H HA) depth -> H HA :=
+  match A with
+  | [] => fun p v => impl (bottom HA) (bottom HA)
+  | a::A => fun p v => meet (eval_rec val (proj1 (valid_cons_eq p)) v) (Meet_valid_ctx val (proj2 (valid_cons_eq p)) v)
+  end.
+
+Lemma Meet_valid_ctx_proof_irrelevance HA (val : nat -> H HA) A depth (p q : is_valid_ctx depth A) :
+  Meet_valid_ctx val p = Meet_valid_ctx val q.
+Proof.
+  revert p q.
+  induction A; intros p q.
+  - reflexivity.
+  - simpl Meet_valid_ctx.
+    apply f_equal2 with (f := fun f1 f2 v => meet (f1 v) (f2 v)).
+    + apply eval_rec_proof_irrelevance.
+    + apply IHA.
+Qed.
+
+Lemma Meet_valid_ctx_vect_proj HA (val : nat -> H HA) (A : list form) (depth depth' : nat) (p : depth <= depth') (q : is_valid_ctx depth A) (v : vect (H HA) depth') :
+  equivalent (Meet_valid_ctx val (is_valid_ctx_increasing p q) v) (Meet_valid_ctx val q (vect_proj p v)).
+Proof.
+  revert q.
+  induction A; intro q.
+  - split; apply leq_refl.
+  - simpl Meet_valid_ctx.
+    apply equivalent_meet.
+    + rewrite eval_rec_proof_irrelevance with (p := proj1 (valid_cons_eq (is_valid_ctx_increasing p q))) (q := is_valid_increasing p (proj1 (valid_cons_eq q))).
+      apply eval_rec_vect_proj.
+    + rewrite Meet_valid_ctx_proof_irrelevance with (p := proj2 (valid_cons_eq (is_valid_ctx_increasing p q))) (q := is_valid_ctx_increasing p (proj2 (valid_cons_eq q))).
+      apply IHA.
+Qed.
+
+Lemma nd_soundHA_aux (HA : HeytingAlgebra) (val : nat -> H HA) (A : list form) (s : form) (depth : nat) (p : is_valid_ctx depth A) (q : is_valid depth s) (v : vect (H HA) depth) :
+  nd A s -> leq (Meet_valid_ctx val p v) (eval_rec val q v).
+Proof.
+  intro ND.
+  revert depth p q v.
+  induction ND; intros depth p q v.
+  - induction A.
+    + contradiction (in_nil H0).
+    + destruct H0; simpl Meet_valid_ctx.
+      * clear IHA.
+        revert q. rewrite <- H0. intro q.
+        rewrite eval_rec_proof_irrelevance with (p := proj1 (valid_cons_eq p)) (q := q).
+        apply leq_meet with (s := eval_rec val q v) (t := Meet_valid_ctx val (proj2 (valid_cons_eq p)) v) (u := meet (eval_rec val q v) (Meet_valid_ctx val (proj2 (valid_cons_eq p)) v)).
+        apply leq_refl.
+      * apply leq_trans with (t := Meet_valid_ctx val (proj2 (valid_cons_eq p)) v).
+          apply leq_meet with (s := eval_rec val (proj1 (valid_cons_eq p)) v) (t := Meet_valid_ctx val (proj2 (valid_cons_eq p)) v) (u := meet (eval_rec val (proj1 (valid_cons_eq p)) v) (Meet_valid_ctx val (proj2 (valid_cons_eq p)) v)).
+          apply leq_refl.
+          apply IHA.
+          apply H0.
+  - apply leq_trans with (t := bottom HA).
+    + apply IHND with (p := p) (q := Valid_bot depth).
+    + apply leq_bottom.
+  - simpl eval_rec. 
+    apply leq_impl.
+    apply leq_trans with (t := Meet_valid_ctx val (Valid_cons (proj1 (valid_imp_eq q)) p) v).
+    + simpl Meet_valid_ctx.
+      rewrite eval_rec_proof_irrelevance with (p := proj1 (valid_cons_eq (Valid_cons (proj1 (valid_imp_eq q)) p))) (q := proj1 (valid_imp_eq q)).
+      rewrite Meet_valid_ctx_proof_irrelevance with (p := proj2 (valid_cons_eq (Valid_cons (proj1 (valid_imp_eq q)) p))) (q := p).
+      apply leq_meet.
+      split;
+        apply leq_meet with (s := Meet_valid_ctx val p v) (t := eval_rec val (proj1 (valid_imp_eq q)) v) (u := meet (Meet_valid_ctx val p v) (eval_rec val (proj1 (valid_imp_eq q)) v));
+        apply leq_refl.
+    + apply IHND.
+  - destruct (is_valid_eventually s) as (depth',r).
+    apply leq_trans with (t :=  Meet_valid_ctx val p (vect_proj (Nat.le_max_l depth depth') (vect_app (bottom HA) (Nat.le_max_l depth depth') v))).
+      rewrite vect_proj_app_inv.
+      apply leq_refl.
+    apply leq_trans with (t := Meet_valid_ctx val (is_valid_ctx_increasing (Nat.le_max_l depth depth') p) (vect_app (bottom HA) (Nat.le_max_l depth depth') v)).
+      apply Meet_valid_ctx_vect_proj.
+    apply leq_trans with (t := eval_rec val (is_valid_increasing (Nat.le_max_l depth depth') q) (vect_app (bottom HA) (Nat.le_max_l depth depth') v)).
+    + apply leq_trans with (t := meet (eval_rec val (Valid_imp (is_valid_increasing (Nat.le_max_r depth depth') r) (is_valid_increasing (Nat.le_max_l depth depth') q)) (vect_app (bottom HA) (Nat.le_max_l depth depth') v)) (eval_rec val (is_valid_increasing (Nat.le_max_r depth depth') r) (vect_app (bottom HA) (Nat.le_max_l depth depth') v))).
+      * apply leq_meet.
+        split.
+          apply IHND2.
+          apply IHND1.
+      * apply leq_impl.
+        simpl eval_rec.
+        rewrite eval_rec_proof_irrelevance with (p := proj1 (Logic.conj (is_valid_increasing (Nat.le_max_r depth depth') r) (is_valid_increasing (Nat.le_max_l depth depth') q))) (q := is_valid_increasing (Nat.le_max_r depth depth') r).
+        rewrite eval_rec_proof_irrelevance with (p := proj2 (Logic.conj (is_valid_increasing (Nat.le_max_r depth depth') r) (is_valid_increasing (Nat.le_max_l depth depth') q))) (q := is_valid_increasing (Nat.le_max_l depth depth') q).
+        apply leq_refl.
+    + apply leq_trans with (t := eval_rec val q (vect_proj (Nat.le_max_l depth depth') (vect_app (bottom HA) (Nat.le_max_l depth depth') v))).
+      * apply eval_rec_vect_proj.
+      * rewrite vect_proj_app_inv.
+        apply leq_refl.
+  - 
 
 (** 2.d *)
 Fixpoint Meet_list {HA} (val : nat -> H HA) (l : list form) :=
