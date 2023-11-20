@@ -791,7 +791,7 @@ Proof.
   remember (bound_var n) as s.
   intro HValid.
   destruct HValid; solve [discriminate Heqs | injection Heqs; intro Eqs; rewrite <- Eqs; assumption].
-Defined.
+Qed.
 
 Lemma valid_imp_eq (depth : nat) (s t : form) :
   is_valid depth (imp s t) -> is_valid depth s /\ is_valid depth t.
@@ -799,7 +799,7 @@ Proof.
   remember (imp s t) as u.
   intro HValid.
   destruct HValid; solve [discriminate Hequ | injection Hequ; intros Eqt Eqs; rewrite <- Eqt; rewrite <- Eqs; split; assumption]. 
-Defined.
+Qed.
 
 Lemma valid_conj_eq (depth : nat) (s t : form) :
   is_valid depth (conj s t) -> is_valid depth s /\ is_valid depth t.
@@ -807,7 +807,7 @@ Proof.
   remember (conj s t) as u.
   intro HValid.
   destruct HValid; solve [discriminate Hequ | injection Hequ; intros Eqt Eqs; rewrite <- Eqt; rewrite <- Eqs; split; assumption]. 
-Defined.
+Qed.
 
 Lemma valid_disj_eq (depth : nat) (s t : form) :
   is_valid depth (disj s t) -> is_valid depth s /\ is_valid depth t.
@@ -815,7 +815,7 @@ Proof.
   remember (disj s t) as u.
   intro HValid.
   destruct HValid; solve [discriminate Hequ | injection Hequ; intros Eqt Eqs; rewrite <- Eqt; rewrite <- Eqs; split; assumption]. 
-Defined.
+Qed.
 
 Lemma valid_for_all_eq (depth : nat) (s : form) :
   is_valid depth (for_all s) -> is_valid (S depth) s.
@@ -823,7 +823,7 @@ Proof.
   remember (for_all s) as t.
   intro HValid.
   destruct HValid; solve [discriminate Heqt | injection Heqt; intro Eqs; rewrite <- Eqs; assumption].
-Defined.
+Qed.
 
 Lemma valid_exist_eq (depth : nat) (s : form) :
   is_valid depth (exist s) -> is_valid (S depth) s.
@@ -831,7 +831,7 @@ Proof.
   remember (exist s) as t.
   intro HValid.
   destruct HValid; solve [discriminate Heqt | injection Heqt; intro Eqs; rewrite <- Eqs; assumption].
-Defined.
+Qed.
 
 Lemma is_valid_increasing (f : form) (depth depth' : nat) :
   depth <= depth' -> is_valid depth f -> is_valid depth' f.
@@ -2089,8 +2089,8 @@ Proof.
           apply IHND1.
       * apply leq_impl.
         simpl eval_rec.
-        rewrite eval_rec_proof_irrelevance with (p := proj1 (Logic.conj (is_valid_increasing (Nat.le_max_r depth depth') r) (is_valid_increasing (Nat.le_max_l depth depth') q))) (q := is_valid_increasing (Nat.le_max_r depth depth') r).
-        rewrite eval_rec_proof_irrelevance with (p := proj2 (Logic.conj (is_valid_increasing (Nat.le_max_r depth depth') r) (is_valid_increasing (Nat.le_max_l depth depth') q))) (q := is_valid_increasing (Nat.le_max_l depth depth') q).
+        rewrite eval_rec_proof_irrelevance with (p := proj1 (valid_imp_eq (Valid_imp (is_valid_increasing (Nat.le_max_r depth depth') r) (is_valid_increasing (Nat.le_max_l depth depth') q)))) (q := is_valid_increasing (Nat.le_max_r depth depth') r).
+        rewrite eval_rec_proof_irrelevance with (p := proj2 (valid_imp_eq (Valid_imp (is_valid_increasing (Nat.le_max_r depth depth') r) (is_valid_increasing (Nat.le_max_l depth depth') q)))) (q := is_valid_increasing (Nat.le_max_l depth depth') q).
         apply leq_refl.
     + apply leq_trans with (t := eval_rec val q (vect_proj (Nat.le_max_l depth depth') (vect_app (bottom HA) (Nat.le_max_l depth depth') v))).
       * apply eval_rec_vect_proj.
@@ -2193,6 +2193,7 @@ Proof.
     + apply IHND.
     + apply leq_trans with (t := eval_rec val (proj2 (valid_unbind_rec s x (Nat.le_0_l depth)) q) (Vcons (val x) v)).
       * apply leq_inf with (P := fun_image (fun (u : H HA) => eval_rec val (proj2 (valid_unbind_rec s x (Nat.le_0_l depth)) q) (Vcons u v)) (fun _ => True)).
+          rewrite eval_rec_proof_irrelevance with (p := proj2 (valid_unbind_rec s x (Nat.le_0_l depth)) q) (q := valid_for_all_eq (Valid_for_all (proj2 (valid_unbind_rec s x (Nat.le_0_l depth)) q))).
           apply leq_refl.
           apply Fun_image with (a := val x).
           trivial.
